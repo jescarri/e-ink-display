@@ -1,15 +1,23 @@
+---
 esphome:
   name: kiosk-1
   friendly_name: kiosk-1
   on_boot:
-    priority: 200
+    priority: 0
     then:
+      - display.page.show: paint_red
+      - component.update: epaper_display
+      - display.page.show: paint_white
+      - component.update: epaper_display
+      - display.page.show: clear
+      - component.update: epaper_display
+      - display.page.show: content
       - component.update: epaper_display
 
 esp32:
   board: esp32dev
   framework:
-    type: esp-idf
+    type: arduino
 
 logger:
 
@@ -32,22 +40,16 @@ captive_portal:
 
 external_components:
   - source: github://pr#6209
-    components: [ waveshare_epaper ]
+    components: [waveshare_epaper]
 
 spi:
   clk_pin: GPIO18
   mosi_pin: GPIO23
 
 font:
-  - file: "gfonts://Inter@700"
-    id: font_large
-    size: 72
-  - file: "gfonts://Inter@700"
-    id: font_medium
-    size: 48
-  - file: "gfonts://Inter@700"
-    id: font_small
-    size: 24
+  - file: "gfonts://Geist Mono"
+    id: main_big
+    size: 40
 
 time:
   - platform: homeassistant
@@ -58,22 +60,27 @@ display:
     id: epaper_display
     cs_pin: GPIO5
     dc_pin: GPIO17
-    busy_pin: GPIO4
-    reset_pin: GPIO16
-    model: 4.20in-v2
-    full_update_every: 1
-    update_interval: 60s
-    display_mode: FULL
-    
-    lambda: |-
-      it.fill(COLOR_OFF);
-      it.print(200, 150, id(font_large), COLOR_ON, TextAlign::CENTER, "Hello World");
-      
-      if (id(esptime).now().is_valid()) {
-        it.strftime(200, 20, id(font_small), COLOR_ON, TextAlign::TOP_CENTER, 
-                    "%A %B %d, %Y", id(esptime).now());
-        it.strftime(200, 50, id(font_medium), COLOR_ON, TextAlign::TOP_CENTER, 
-                    "%I:%M %p", id(esptime).now());
-      }
-      
-      it.rectangle(5, 5, 390, 290, COLOR_ON);
+    reset_pin:
+      number: GPIO16
+      inverted: False
+    busy_pin:
+      number: GPIO4
+      inverted: False
+    model: 4.20in-bv2-bwr
+    rotation: 180
+    update_interval: never
+    reset_duration: 2ms
+    pages:
+      - id: paint_red
+        lambda: |-
+          it.filled_rectangle(0, 0, it.get_width(), it.get_height(), Color(255, 0, 0));
+      - id: paint_white
+        lambda: |-
+          it.filled_rectangle(0, 0, it.get_width(), it.get_height(), COLOR_OFF);
+      - id: clear
+        lambda: |-
+          it.clear();
+      - id: content
+        lambda: |-
+          it.filled_rectangle(0, 0, it.get_width(), it.get_height(), COLOR_OFF);
+          it.print(200, 150, id(main_big), COLOR_ON, TextAlign::CENTER, "Hello World");
