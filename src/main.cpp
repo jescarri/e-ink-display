@@ -28,6 +28,7 @@
 #include "NetworkManager.h"
 #include "PowerManager.h"
 #include "PlantMonitor.h"
+#include "OtaManager.h"
 
 // Global instances
 PlantMonitor monitor;
@@ -46,6 +47,9 @@ void setup()
     
     // Initialize settings system
     settings_init();
+    
+    // Initialize battery sensor after Serial is ready
+    power.initBatterySensor();
     
     // Get node name
     String nodeName = settings_get_string("node_name", DEFAULT_NODE_NAME);
@@ -93,11 +97,15 @@ void setup()
     // Get battery info for LWT
     float batteryVoltage = power.getBatteryVoltage();
     int batteryPercent = power.getBatteryPercentage();
+    float chargeRate = power.getChargeRate();
+    bool batterySensorPresent = power.isBatterySensorPresent();
     
     // Prepare LWT message
     StaticJsonDocument<256> lwtDoc;
     lwtDoc["battery_percentage"] = batteryPercent;
     lwtDoc["battery_voltage"] = batteryVoltage;
+    lwtDoc["charge_rate"] = chargeRate;
+    lwtDoc["battery_sensor_present"] = batterySensorPresent;
     String lwtPayload;
     serializeJson(lwtDoc, lwtPayload);
     
@@ -110,6 +118,37 @@ void setup()
     if (!network.connectMQTT(clientId.c_str())) {
         Serial.println("MQTT connection failed! Restarting...");
         ESP.restart();
+    }
+    
+    // Check for OTA update first
+    String otaTopic = "displays/" + nodeName + "/rx";
+    Serial.printf("Checking for OTA update on: %s\r\n", otaTopic.c_str());
+    network.subscribeMQTT(otaTopic.c_str());
+    
+    String otaMessage = network.getLastRetainedMessage(5000);
+    if (otaMessage.length() > 0) {
+        Serial.println("OTA update message received!");
+        
+        // Clear the retained message immediately
+        network.publishMQTT(otaTopic.c_str(), "", true);
+        Serial.println("Cleared OTA retained message");
+        
+        // Initialize display and show upgrade screen
+        monitor.init();
+        monitor.showUpgradeScreen();
+        
+        // Process OTA update
+        OtaManager ota;
+        if (ota.processUpdate(otaMessage)) {
+            Serial.println("OTA update successful - rebooting...");
+            delay(1000);
+            ESP.restart();
+        } else {
+            Serial.println("OTA update failed - continuing normal operation");
+            // Display will be reinitialized below for normal operation
+        }
+    } else {
+        Serial.println("No OTA update pending");
     }
     
     // Subscribe to configured topic

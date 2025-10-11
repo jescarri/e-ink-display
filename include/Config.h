@@ -37,4 +37,10 @@
 #define MAX_STRING_LEN         64
 #define MAX_TOPIC_LEN          128
 
+// OTA Configuration
+#define OTA_WIFI_TIMEOUT       15000   // 15 seconds for WiFi connection during OTA
+#define OTA_HTTP_TIMEOUT       30000   // 30 seconds for HTTP operations
+#define OTA_CONNECT_TIMEOUT    15000   // 15 seconds for HTTP connection
+#define OTA_RX_TOPIC_SUFFIX    "/rx"   // Suffix for OTA receive topic: displays/<node_name>/rx
+
 #endif // CONFIG_H

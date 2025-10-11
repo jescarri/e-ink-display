@@ -1,0 +1,145 @@
+name: Release Pipeline
+
+on:
+  push:
+    tags:
+      - '[0-9][0-9][0-9]'  # Matches 3-digit tags: 100, 101, 110, etc.
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and Release Firmware
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate tag format
+        id: validate-tag
+        run: |
+          # Extract tag name
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          
+          # Verify 3-digit format
+          if [[ "$TAG_NAME" =~ ^[0-9]{3}$ ]]; then
+            echo "✅ Tag '$TAG_NAME' is valid (3-digit format)"
+            echo "firmware_version=$TAG_NAME" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Error: Tag '$TAG_NAME' is not a valid 3-digit integer"
+            echo "Valid examples: 100 (v1.0.0), 101 (v1.0.1), 110 (v1.1.0)"
+            echo "Invalid examples: v100, 1000, 99"
+            exit 1
+          fi
+
+      - name: Update platformio.ini with tag version
+        run: |
+          # Replace FIRMWARE_VERSION in platformio.ini
+          sed -i "s/-D FIRMWARE_VERSION=[0-9]\+/-D FIRMWARE_VERSION=${{ steps.validate-tag.outputs.firmware_version }}/" platformio.ini
+          echo "Updated platformio.ini with FIRMWARE_VERSION=${{ steps.validate-tag.outputs.firmware_version }}"
+          
+          # Verify the change
+          grep "FIRMWARE_VERSION" platformio.ini
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install PlatformIO
+        run: |
+          pip install --upgrade platformio
+          pio --version
+
+      - name: Build firmware
+        run: |
+          echo "Building firmware for version ${{ steps.validate-tag.outputs.firmware_version }}..."
+          platformio run
+
+      - name: Calculate MD5 checksum
+        id: calculate-md5
+        run: |
+          MD5SUM=$(md5sum .pio/build/esp32dev/firmware.bin | awk '{print $1}')
+          echo "md5sum=$MD5SUM" >> $GITHUB_OUTPUT
+          echo "Firmware MD5: $MD5SUM"
+
+      - name: Create release artifacts
+        run: |
+          mkdir -p artifacts
+          
+          # Copy firmware with proper naming: e-paper.<version>.bin
+          cp .pio/build/esp32dev/firmware.bin artifacts/e-paper.${{ steps.validate-tag.outputs.tag_name }}.bin
+          cp .pio/build/esp32dev/firmware.elf artifacts/e-paper.${{ steps.validate-tag.outputs.tag_name }}.elf
+          
+          # Create build info JSON
+          cat > artifacts/build-info-${{ steps.validate-tag.outputs.tag_name }}.json << EOF
+          {
+            "version": "${{ steps.validate-tag.outputs.tag_name }}",
+            "build_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "commit": "${{ github.sha }}",
+            "branch": "${{ github.ref_name }}",
+            "md5sum": "${{ steps.calculate-md5.outputs.md5sum }}",
+            "files": {
+              "firmware": "e-paper.${{ steps.validate-tag.outputs.tag_name }}.bin",
+              "elf": "e-paper.${{ steps.validate-tag.outputs.tag_name }}.elf"
+            }
+          }
+          EOF
+          
+          # Show what we're releasing
+          ls -lh artifacts/
+          cat artifacts/build-info-${{ steps.validate-tag.outputs.tag_name }}.json
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ steps.validate-tag.outputs.tag_name }}
+          path: artifacts/
+          retention-days: 90
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.validate-tag.outputs.tag_name }}
+          name: E-Paper Firmware ${{ steps.validate-tag.outputs.tag_name }}
+          body: |
+            ## E-Paper Display Firmware Release ${{ steps.validate-tag.outputs.tag_name }}
+            
+            ### Build Information
+            - **Version**: ${{ steps.validate-tag.outputs.tag_name }}
+            - **Build Date**: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+            - **Commit**: ${{ github.sha }}
+            - **MD5**: `${{ steps.calculate-md5.outputs.md5sum }}`
+            
+            ### Files
+            - `e-paper.${{ steps.validate-tag.outputs.tag_name }}.bin` - Firmware binary for OTA updates
+            - `e-paper.${{ steps.validate-tag.outputs.tag_name }}.elf` - ELF file (for debugging)
+            - `build-info-${{ steps.validate-tag.outputs.tag_name }}.json` - Build metadata
+            
+            ### Installation via OTA
+            
+            Use the CLI tool to trigger an OTA update:
+            
+            ```bash
+            ./e-paper-cli update-display \
+              --url "https://github.com/${{ github.repository }}/releases/download/${{ steps.validate-tag.outputs.tag_name }}/e-paper.${{ steps.validate-tag.outputs.tag_name }}.bin" \
+              --version "${{ steps.validate-tag.outputs.tag_name }}" \
+              --device-name "your-display-name" \
+              --private-key "./private.key" \
+              --mqtt-broker "tcp://your-broker:1883"
+            ```
+            
+            ### Manual Installation
+            
+            Flash directly via USB:
+            ```bash
+            platformio run --target upload
+            ```
+          files: artifacts/*
+          generate_release_notes: false
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

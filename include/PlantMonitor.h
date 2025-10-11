@@ -52,6 +52,11 @@ public:
      */
     void wake();
 
+    /**
+     * Show firmware upgrade screen
+     */
+    void showUpgradeScreen();
+
 private:
     // Plant data structure
     struct PlantData {

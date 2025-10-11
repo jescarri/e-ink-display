@@ -57,6 +57,46 @@ void PlantMonitor::wake()
 }
 
 /**
+ * Show firmware upgrade screen
+ */
+void PlantMonitor::showUpgradeScreen()
+{
+    Serial.println("Displaying firmware upgrade screen...");
+    
+    display.setFullWindow();
+    display.firstPage();
+    
+    do {
+        display.fillScreen(GxEPD_WHITE);
+        display.setTextColor(GxEPD_BLACK);
+        display.setFont(&DejaVu_Sans_Bold_11);
+        display.setTextSize(2);
+        
+        int16_t tbx, tby;
+        uint16_t tbw, tbh;
+        
+        // "Firmware Upgrade" text
+        const char* msg1 = "Firmware Upgrade";
+        display.getTextBounds(msg1, 0, 0, &tbx, &tby, &tbw, &tbh);
+        int x = (SCREEN_W - tbw) / 2;
+        int y = (SCREEN_H / 2) - 20;
+        display.setCursor(x, y);
+        display.print(msg1);
+        
+        // "In Progress..." text
+        const char* msg2 = "In Progress...";
+        display.getTextBounds(msg2, 0, 0, &tbx, &tby, &tbw, &tbh);
+        x = (SCREEN_W - tbw) / 2;
+        y += tbh + 20;
+        display.setCursor(x, y);
+        display.print(msg2);
+        
+    } while (display.nextPage());
+    
+    Serial.println("Firmware upgrade screen displayed");
+}
+
+/**
  * Parse JSON data and populate internal plant array
  */
 void PlantMonitor::parseJsonData(const JsonDocument& jsonDoc)
