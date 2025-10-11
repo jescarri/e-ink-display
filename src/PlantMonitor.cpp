@@ -184,13 +184,24 @@ int PlantMonitor::drawHeader()
     display.getTextBounds(updateLine.c_str(), 0, 0, &tbx, &tby, &tbw, &tbh);
     currentY += tbh;
     
-    // Calculate full line width including battery icon
+    // Calculate full line width including battery icon and version
     String batteryStr = String(batteryPercent) + "%";
+    
+    // Format version as vX.X.X from FIRMWARE_VERSION (e.g., 101 -> v1.0.1)
+    int version = FIRMWARE_VERSION;
+    int major = version / 100;
+    int minor = (version / 10) % 10;
+    int patch = version % 10;
+    String versionStr = " v" + String(major) + "." + String(minor) + "." + String(patch);
+    
     int16_t btbx, btby;
     uint16_t btbw, btbh;
     display.getTextBounds(batteryStr.c_str(), 0, 0, &btbx, &btby, &btbw, &btbh);
+    uint16_t versionW, versionH;
+    display.getTextBounds(versionStr.c_str(), 0, 0, &btbx, &btby, &versionW, &versionH);
+    
     int batteryIconWidth = 20;  // Icon width
-    int totalWidth = tbw + batteryIconWidth + 4 + btbw;  // Text + icon + gap + percentage
+    int totalWidth = tbw + batteryIconWidth + 4 + btbw + versionW;  // Text + icon + gap + percentage + version
     
     int startX = SCREEN_W / 2 - totalWidth / 2;
     display.setCursor(startX, currentY);
@@ -206,6 +217,10 @@ int PlantMonitor::drawHeader()
     display.setCursor(iconX + batteryIconWidth + 4, currentY);
     display.print(batteryStr);
     display.setTextColor(GxEPD_BLACK);  // Reset color
+    
+    // Draw version
+    display.setCursor(iconX + batteryIconWidth + 4 + btbw, currentY);
+    display.print(versionStr);
     
     // Separator line - thicker (3 pixels)
     currentY += 4;  // Small gap before line

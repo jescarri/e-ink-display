@@ -143,7 +143,7 @@ bool OtaManager::downloadAndInstall(const String& url, const String& md5sum, con
         unsigned long now = millis();
         
         if (now - lastUpdate >= 2000 || progress == total) {
-            Serial.printf("[OTA] Progress: %d/%d bytes (%.1f%%)\\r\\n", 
+            Serial.printf("[OTA] Progress: %d/%d bytes (%.1f%%)\r\n", 
                          progress, total, (progress * 100.0) / total);
             lastUpdate = now;
         }
