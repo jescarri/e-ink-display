@@ -122,33 +122,16 @@ bool OtaManager::downloadAndInstall(const String& url, const String& md5sum, con
     Serial.printf("[OTA] Expected MD5: %s\r\n", md5sum.c_str());
     Serial.printf("[OTA] Version: %s\r\n", version.c_str());
 
-    // Get saved WiFi credentials
-    String ssid = settings_get_string("wifi_ssid", "");
-    String password = settings_get_string("wifi_password", "");
-
-    if (ssid.length() == 0) {
-        Serial.println("[OTA] ERROR: No WiFi SSID configured!");
+    // Check if WiFi is already connected (we're called right after MQTT connection)
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("[OTA] WiFi already connected - reusing existing connection");
+        Serial.printf("[OTA] SSID: %s\r\n", WiFi.SSID().c_str());
+        Serial.printf("[OTA] IP Address: %s\r\n", WiFi.localIP().toString().c_str());
+    } else {
+        Serial.println("[OTA] ERROR: WiFi not connected! OTA requires active WiFi connection.");
+        Serial.println("[OTA] This should not happen - OTA is checked after MQTT connection.");
         return false;
     }
-
-    // Connect to WiFi
-    Serial.println("[OTA] Connecting to WiFi...");
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid.c_str(), password.c_str());
-
-    unsigned long startTime = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - startTime < 15000) {
-        delay(500);
-        Serial.print(".");
-    }
-
-    if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("\n[OTA] ERROR: WiFi connection failed!");
-        return false;
-    }
-
-    Serial.println("\n[OTA] WiFi connected!");
-    Serial.printf("[OTA] IP Address: %s\r\n", WiFi.localIP().toString().c_str());
 
     // Configure HTTPUpdate
     httpUpdate.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
