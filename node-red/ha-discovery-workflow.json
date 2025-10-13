@@ -1,0 +1,340 @@
+[
+  {
+    "id": "ha_discovery_tab",
+    "type": "tab",
+    "label": "E-Paper HA Auto-Discovery",
+    "disabled": false,
+    "info": "Home Assistant MQTT auto-discovery for e-paper display devices. Listens to LWT messages and publishes sensor discovery configs."
+  },
+  {
+    "id": "mqtt_broker_ha",
+    "type": "mqtt-broker",
+    "name": "Home Assistant MQTT",
+    "broker": "core-mosquitto",
+    "port": "1883",
+    "tls": "",
+    "clientid": "",
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true,
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthRetain": "false",
+    "birthPayload": "",
+    "birthMsg": {},
+    "closeTopic": "",
+    "closeQos": "0",
+    "closeRetain": "false",
+    "closePayload": "",
+    "closeMsg": {},
+    "willTopic": "",
+    "willQos": "0",
+    "willRetain": "false",
+    "willPayload": "",
+    "willMsg": {}
+  },
+  {
+    "id": "lwt_subscriber",
+    "type": "mqtt in",
+    "z": "ha_discovery_tab",
+    "name": "Subscribe to LWT",
+    "topic": "displays/+/lwt",
+    "qos": "1",
+    "datatype": "auto",
+    "broker": "mqtt_broker_ha",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 150,
+    "y": 200,
+    "wires": [
+      [
+        "autodiscovery_function"
+      ]
+    ]
+  },
+  {
+    "id": "autodiscovery_function",
+    "type": "function",
+    "z": "ha_discovery_tab",
+    "name": "Auto-Discovery Logic",
+    "func": "// Home Assistant MQTT Auto-Discovery for E-Paper Display\n// Parses LWT messages and creates HA sensor discovery configs\n// Based on lora-sensor auto-discovery pattern\n\n// Extract device name from topic: displays/<device_name>/lwt\nconst topicParts = msg.topic.split('/');\nif (topicParts.length < 3 || topicParts[0] !== 'displays' || topicParts[2] !== 'lwt') {\n    node.warn(\"Invalid topic format: \" + msg.topic);\n    return null;\n}\n\nconst deviceName = topicParts[1];\n\n// Parse LWT payload\nif (!msg.payload || msg.payload === \"\") {\n    node.warn(\"Empty payload received\");\n    return null;\n}\n\nlet lwtData;\ntry {\n    lwtData = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : msg.payload;\n} catch (e) {\n    node.error(\"Failed to parse LWT JSON: \" + e.message);\n    return null;\n}\n\n// Generate timestamp for last_seen sensor\nconst d = new Date();\nconst dIso = d.toISOString();\n\n// Parse firmware version (100 -> v1.0.0)\nlet fw_version_raw = lwtData.firmware_version;\nlet fw_version = 'v0.0.0';\nif (fw_version_raw !== undefined && fw_version_raw !== null) {\n    const major = Math.floor(fw_version_raw / 100);\n    const minor = Math.floor((fw_version_raw % 100) / 10);\n    const patch = fw_version_raw % 10;\n    fw_version = `v${major}.${minor}.${patch}`;\n}\n\n// Generate unique device identifier (using MAC from device name or fallback to device name)\nconst deviceId = deviceName.replace(/-/g, '_');\nconst uniqueDeviceId = deviceName;\n\n// Common device configuration\nconst deviceConfig = {\n    hw_version: \"v1.0.0\",\n    sw_version: fw_version,\n    identifiers: [uniqueDeviceId],\n    manufacturer: \"VA7RCV\",\n    name: deviceName,\n    model: \"E-Paper Display ESP32\"\n};\n\n// State topic (LWT topic contains all sensor data)\nconst stateTopic = \"displays/\" + deviceName + \"/lwt\";\n\n// Availability using LWT topic\nconst availabilityConfig = {\n    topic: stateTopic,\n    value_template: \"{{ 'online' if value_json.battery_percentage is defined else 'offline' }}\"\n};\n\n// --- Battery Percentage Sensor ---\nvar battery_percentage = {\n    payload: {\n        name: \"battery\",\n        state_topic: stateTopic,\n        value_template: \"{{ value_json.battery_percentage }}\",\n        platform: \"sensor\",\n        device_class: \"battery\",\n        force_update: true,\n        state_class: \"measurement\",\n        unit_of_measurement: \"%\",\n        object_id: deviceId,\n        unique_id: uniqueDeviceId + \"_battery_percentage\",\n        device: deviceConfig,\n        availability: availabilityConfig\n    },\n    topic: \"homeassistant/sensor/\" + deviceName + \"/battery/config\"\n};\n\n// --- Battery Voltage Sensor ---\nvar battery_voltage = {\n    payload: {\n        name: \"voltage\",\n        state_topic: stateTopic,\n        value_template: \"{{ value_json.battery_voltage }}\",\n        platform: \"sensor\",\n        device_class: \"voltage\",\n        force_update: true,\n        state_class: \"measurement\",\n        unit_of_measurement: \"V\",\n        object_id: deviceId,\n        unique_id: uniqueDeviceId + \"_battery_voltage\",\n        device: deviceConfig,\n        availability: availabilityConfig\n    },\n    topic: \"homeassistant/sensor/\" + deviceName + \"/voltage/config\"\n};\n\n// --- Charge Rate Sensor ---\nvar charge_rate = {\n    payload: {\n        name: \"charge_rate\",\n        state_topic: stateTopic,\n        value_template: \"{{ value_json.charge_rate }}\",\n        platform: \"sensor\",\n        force_update: true,\n        state_class: \"measurement\",\n        unit_of_measurement: \"%/hr\",\n        object_id: deviceId,\n        unique_id: uniqueDeviceId + \"_charge_rate\",\n        device: deviceConfig,\n        availability: availabilityConfig,\n        icon: \"mdi:battery-charging\"\n    },\n    topic: \"homeassistant/sensor/\" + deviceName + \"/charge_rate/config\"\n};\n\n// --- Battery Sensor Presence (Binary Sensor) ---\nvar battery_sensor_present = {\n    payload: {\n        name: \"battery_sensor\",\n        state_topic: stateTopic,\n        value_template: \"{{ 'ON' if value_json.battery_sensor_present else 'OFF' }}\",\n        platform: \"binary_sensor\",\n        device_class: \"connectivity\",\n        force_update: true,\n        object_id: deviceId,\n        unique_id: uniqueDeviceId + \"_battery_sensor_present\",\n        device: deviceConfig,\n        availability: availabilityConfig,\n        payload_on: \"ON\",\n        payload_off: \"OFF\"\n    },\n    topic: \"homeassistant/binary_sensor/\" + deviceName + \"/battery_sensor/config\"\n};\n\n// --- WiFi RSSI Sensor ---\nvar rssi = {\n    payload: {\n        name: \"rssi\",\n        state_topic: stateTopic,\n        value_template: \"{{ value_json.rssi }}\",\n        platform: \"sensor\",\n        device_class: \"signal_strength\",\n        force_update: true,\n        state_class: \"measurement\",\n        unit_of_measurement: \"dBm\",\n        object_id: deviceId,\n        unique_id: uniqueDeviceId + \"_rssi\",\n        device: deviceConfig,\n        availability: availabilityConfig,\n        icon: \"mdi:wifi\"\n    },\n    topic: \"homeassistant/sensor/\" + deviceName + \"/rssi/config\"\n};\n\n// --- Sleep Time Sensor ---\nvar sleep_time = {\n    payload: {\n        name: \"sleep_time\",\n        state_topic: stateTopic,\n        value_template: \"{{ value_json.sleep_time }}\",\n        platform: \"sensor\",\n        device_class: \"duration\",\n        force_update: true,\n        state_class: \"measurement\",\n        unit_of_measurement: \"h\",\n        object_id: deviceId,\n        unique_id: uniqueDeviceId + \"_sleep_time\",\n        device: deviceConfig,\n        availability: availabilityConfig,\n        icon: \"mdi:sleep\"\n    },\n    topic: \"homeassistant/sensor/\" + deviceName + \"/sleep_time/config\"\n};\n\n// --- Firmware Version Sensor ---\nvar firmware_version = {\n    payload: {\n        name: \"firmware_version\",\n        state_topic: stateTopic,\n        value_template: \"{% set fw = value_json.firmware_version | int %}{% set major = (fw / 100) | int %}{% set minor = ((fw % 100) / 10) | int %}{% set patch = fw % 10 %}v{{ major }}.{{ minor }}.{{ patch }}\",\n        platform: \"sensor\",\n        force_update: true,\n        object_id: deviceId,\n        unique_id: uniqueDeviceId + \"_firmware_version\",\n        device: deviceConfig,\n        availability: availabilityConfig,\n        icon: \"mdi:chip\"\n    },\n    topic: \"homeassistant/sensor/\" + deviceName + \"/firmware_version/config\"\n};\n\n// --- Free Heap Sensor ---\nvar free_heap = {\n    payload: {\n        name: \"free_heap\",\n        state_topic: stateTopic,\n        value_template: \"{{ value_json.free_heap }}\",\n        platform: \"sensor\",\n        force_update: true,\n        state_class: \"measurement\",\n        unit_of_measurement: \"bytes\",\n        object_id: deviceId,\n        unique_id: uniqueDeviceId + \"_free_heap\",\n        device: deviceConfig,\n        availability: availabilityConfig,\n        icon: \"mdi:memory\"\n    },\n    topic: \"homeassistant/sensor/\" + deviceName + \"/free_heap/config\"\n};\n\n// --- Last Seen Sensor ---\nvar last_seen = {\n    payload: {\n        name: \"last_seen\",\n        state_topic: stateTopic,\n        value_template: dIso,\n        platform: \"sensor\",\n        device_class: \"timestamp\",\n        force_update: true,\n        object_id: deviceId,\n        unique_id: uniqueDeviceId + \"_last_seen\",\n        device: deviceConfig,\n        availability: availabilityConfig,\n        icon: \"mdi:clock-outline\"\n    },\n    topic: \"homeassistant/sensor/\" + deviceName + \"/last_seen/config\"\n};\n\n// --- Debug Data (Optional - for troubleshooting) ---\nvar debug_data = {\n    payload: {\n        device_name: deviceName,\n        battery_percentage: lwtData.battery_percentage,\n        battery_voltage: lwtData.battery_voltage,\n        charge_rate: lwtData.charge_rate,\n        battery_sensor_present: lwtData.battery_sensor_present,\n        rssi: lwtData.rssi,\n        sleep_time: lwtData.sleep_time,\n        firmware_version: lwtData.firmware_version,\n        firmware_version_parsed: fw_version,\n        free_heap: lwtData.free_heap,\n        last_seen: dIso\n    },\n    topic: \"displays/debug/\" + deviceName + \"/log\"\n};\n\n// Log discovery\nnode.status({fill:\"green\", shape:\"dot\", text: \"Discovered: \" + deviceName});\n\n// Return all discovery messages\nreturn [\n    battery_percentage,\n    battery_voltage,\n    charge_rate,\n    battery_sensor_present,\n    rssi,\n    sleep_time,\n    firmware_version,\n    free_heap,\n    last_seen,\n    debug_data\n];",
+    "outputs": 10,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 370,
+    "y": 200,
+    "wires": [
+      [
+        "mqtt_out_1"
+      ],
+      [
+        "mqtt_out_2"
+      ],
+      [
+        "mqtt_out_3"
+      ],
+      [
+        "mqtt_out_4"
+      ],
+      [
+        "mqtt_out_5"
+      ],
+      [
+        "mqtt_out_6"
+      ],
+      [
+        "mqtt_out_7"
+      ],
+      [
+        "mqtt_out_8"
+      ],
+      [
+        "mqtt_out_9"
+      ],
+      [
+        "debug_out"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt_out_1",
+    "type": "mqtt out",
+    "z": "ha_discovery_tab",
+    "name": "Publish Discovery 1",
+    "topic": "",
+    "qos": "1",
+    "retain": "true",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "mqtt_broker_ha",
+    "x": 650,
+    "y": 80,
+    "wires": []
+  },
+  {
+    "id": "mqtt_out_2",
+    "type": "mqtt out",
+    "z": "ha_discovery_tab",
+    "name": "Publish Discovery 2",
+    "topic": "",
+    "qos": "1",
+    "retain": "true",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "mqtt_broker_ha",
+    "x": 650,
+    "y": 120,
+    "wires": []
+  },
+  {
+    "id": "mqtt_out_3",
+    "type": "mqtt out",
+    "z": "ha_discovery_tab",
+    "name": "Publish Discovery 3",
+    "topic": "",
+    "qos": "1",
+    "retain": "true",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "mqtt_broker_ha",
+    "x": 650,
+    "y": 160,
+    "wires": []
+  },
+  {
+    "id": "mqtt_out_4",
+    "type": "mqtt out",
+    "z": "ha_discovery_tab",
+    "name": "Publish Discovery 4",
+    "topic": "",
+    "qos": "1",
+    "retain": "true",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "mqtt_broker_ha",
+    "x": 650,
+    "y": 200,
+    "wires": []
+  },
+  {
+    "id": "mqtt_out_5",
+    "type": "mqtt out",
+    "z": "ha_discovery_tab",
+    "name": "Publish Discovery 5",
+    "topic": "",
+    "qos": "1",
+    "retain": "true",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "mqtt_broker_ha",
+    "x": 650,
+    "y": 240,
+    "wires": []
+  },
+  {
+    "id": "mqtt_out_6",
+    "type": "mqtt out",
+    "z": "ha_discovery_tab",
+    "name": "Publish Discovery 6",
+    "topic": "",
+    "qos": "1",
+    "retain": "true",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "mqtt_broker_ha",
+    "x": 650,
+    "y": 280,
+    "wires": []
+  },
+  {
+    "id": "mqtt_out_7",
+    "type": "mqtt out",
+    "z": "ha_discovery_tab",
+    "name": "Publish Discovery 7",
+    "topic": "",
+    "qos": "1",
+    "retain": "true",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "mqtt_broker_ha",
+    "x": 650,
+    "y": 320,
+    "wires": []
+  },
+  {
+    "id": "mqtt_out_8",
+    "type": "mqtt out",
+    "z": "ha_discovery_tab",
+    "name": "Publish Discovery 8",
+    "topic": "",
+    "qos": "1",
+    "retain": "true",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "mqtt_broker_ha",
+    "x": 650,
+    "y": 360,
+    "wires": []
+  },
+  {
+    "id": "mqtt_out_9",
+    "type": "mqtt out",
+    "z": "ha_discovery_tab",
+    "name": "Publish Discovery 9",
+    "topic": "",
+    "qos": "1",
+    "retain": "true",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "mqtt_broker_ha",
+    "x": 650,
+    "y": 400,
+    "wires": []
+  },
+  {
+    "id": "debug_out",
+    "type": "mqtt out",
+    "z": "ha_discovery_tab",
+    "name": "Publish Debug Data",
+    "topic": "",
+    "qos": "0",
+    "retain": "false",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "mqtt_broker_ha",
+    "x": 670,
+    "y": 440,
+    "wires": []
+  },
+  {
+    "id": "debug_node",
+    "type": "debug",
+    "z": "ha_discovery_tab",
+    "name": "Debug: LWT Message",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 380,
+    "y": 300,
+    "wires": []
+  },
+  {
+    "id": "inject_test",
+    "type": "inject",
+    "z": "ha_discovery_tab",
+    "name": "Test with Mock Data",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "displays/e-paper-test/lwt",
+    "payload": "{\"battery_percentage\":85,\"battery_voltage\":3.95,\"charge_rate\":-0.5,\"battery_sensor_present\":true,\"rssi\":-45,\"sleep_time\":1,\"firmware_version\":100,\"free_heap\":245000}",
+    "payloadType": "json",
+    "x": 160,
+    "y": 100,
+    "wires": [
+      [
+        "autodiscovery_function"
+      ]
+    ]
+  },
+  {
+    "id": "comment_1",
+    "type": "comment",
+    "z": "ha_discovery_tab",
+    "name": "E-Paper Display Auto-Discovery for Home Assistant",
+    "info": "This flow automatically discovers e-paper display devices and registers them in Home Assistant.\n\n**How it works:**\n1. Subscribes to `displays/+/lwt` MQTT topic\n2. Parses device name and sensor data from LWT message\n3. Publishes Home Assistant MQTT discovery configs\n4. Creates 9 sensors per device (battery %, voltage, charge rate, sensor presence, RSSI, sleep time, firmware version, free heap, last seen)\n\n**Testing:**\nUse the \"Test with Mock Data\" inject node to test without a real device.\n\n**Verification:**\nCheck Home Assistant: Configuration → Integrations → MQTT → Devices",
+    "x": 230,
+    "y": 40,
+    "wires": []
+  }
+]

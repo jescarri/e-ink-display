@@ -100,12 +100,21 @@ void setup()
     float chargeRate = power.getChargeRate();
     bool batterySensorPresent = power.isBatterySensorPresent();
     
+    // Get system info for LWT
+    int wifiRssi = WiFi.RSSI();
+    int sleepHours = settings_get_int("sleep_hours", DEFAULT_SLEEP_HOURS);
+    uint32_t freeHeap = ESP.getFreeHeap();
+    
     // Prepare LWT message
-    StaticJsonDocument<256> lwtDoc;
+    StaticJsonDocument<384> lwtDoc;
     lwtDoc["battery_percentage"] = batteryPercent;
     lwtDoc["battery_voltage"] = batteryVoltage;
     lwtDoc["charge_rate"] = chargeRate;
     lwtDoc["battery_sensor_present"] = batterySensorPresent;
+    lwtDoc["rssi"] = wifiRssi;
+    lwtDoc["sleep_time"] = sleepHours;
+    lwtDoc["firmware_version"] = FIRMWARE_VERSION;
+    lwtDoc["free_heap"] = freeHeap;
     String lwtPayload;
     serializeJson(lwtDoc, lwtPayload);
     
@@ -219,9 +228,6 @@ void setup()
     // Disconnect from MQTT and WiFi
     network.disconnectMQTT();
     network.disconnectWiFi();
-    
-    // Get sleep duration from settings
-    int sleepHours = settings_get_int("sleep_hours", DEFAULT_SLEEP_HOURS);
     
     Serial.println("\n=== Operation Complete ===\n");
     Serial.printf("Entering deep sleep for %d hour(s)...\r\n", sleepHours);
