@@ -20,7 +20,7 @@
 #define BATTERY_LOW_THRESHOLD  10  // Below this value battery icon turns RED
 
 // Deep Sleep Configuration
-#define DEEPSLEEP_DISABLE_PIN  0   // GPIO0 - When LOW, deep sleep is disabled (for config)
+#define DEEPSLEEP_DISABLE_PIN  4   // GPIO4 - When LOW, deep sleep is disabled (for config)
 
 // MQTT Configuration
 #define DEFAULT_NODE_NAME      "e-paper-display"

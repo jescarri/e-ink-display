@@ -31,10 +31,11 @@ public:
     /**
      * Start WiFi configuration portal (blocking)
      * @param portalName Name of the AP to create
+     * @param password Password for the AP (if NULL, no password)
      * @param timeoutSeconds Timeout in seconds (0 = no timeout)
      * @return true if configured successfully, false if timeout
      */
-    bool startConfigPortal(const char* portalName, int timeoutSeconds = 300);
+    bool startConfigPortal(const char* portalName, const char* password = NULL, int timeoutSeconds = 300);
 
     /**
      * Connect to WiFi using saved credentials

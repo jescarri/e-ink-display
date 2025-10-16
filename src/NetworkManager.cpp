@@ -92,17 +92,24 @@ void NetworkManager::initConfigPortal()
 /**
  * Start WiFi configuration portal
  */
-bool NetworkManager::startConfigPortal(const char* portalName, int timeoutSeconds)
+bool NetworkManager::startConfigPortal(const char* portalName, const char* password, int timeoutSeconds)
 {
     initConfigPortal();
     
     Serial.printf("Starting config portal: %s\r\n", portalName);
+    if (password) {
+        Serial.printf("AP Password: %s\r\n", password);
+    }
     
     if (timeoutSeconds > 0) {
         wifiManager.setConfigPortalTimeout(timeoutSeconds);
     }
     
-    return wifiManager.startConfigPortal(portalName);
+    if (password) {
+        return wifiManager.startConfigPortal(portalName, password);
+    } else {
+        return wifiManager.startConfigPortal(portalName);
+    }
 }
 
 /**

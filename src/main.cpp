@@ -18,7 +18,7 @@
  *  - CS:   GPIO12, DC:   GPIO17
  *  - RST:  GPIO16, BUSY: GPIO13
  *  - DIN:  GPIO23 (MOSI), CLK:  GPIO18 (SCK)
- *  - Deep Sleep Disable: GPIO0 (LOW = disable deep sleep)
+ *  - Config Mode: GPIO15 (LOW = enable config mode)
  */
 
 #include <Arduino.h>
@@ -45,8 +45,16 @@ void setup()
     Serial.println("Firmware: WiFi + MQTT + Deep Sleep");
     Serial.println();
     
+    // Give pins time to stabilize after boot
+    delay(100);
+    
     // Initialize settings system
     settings_init();
+    
+    // Check if deep sleep is disabled (GPIO15 LOW) - check EARLY before I2C init
+    bool deepSleepDisabled = power.isDeepSleepDisabled();
+    Serial.printf("\nGPIO15 state: %s\r\n", deepSleepDisabled ? "LOW (config mode)" : "HIGH (normal mode)");
+    Serial.printf("Config needed: %s\r\n\n", deepSleepDisabled ? "YES (GPIO15 forced)" : "checking settings...");
     
     // Initialize battery sensor after Serial is ready
     power.initBatterySensor();
@@ -54,9 +62,6 @@ void setup()
     // Get node name
     String nodeName = settings_get_string("node_name", DEFAULT_NODE_NAME);
     Serial.printf("Node: %s\r\n", nodeName.c_str());
-    
-    // Check if deep sleep is disabled (GPIO0 LOW)
-    bool deepSleepDisabled = power.isDeepSleepDisabled();
     
     // Check if we have configuration
     // WiFi credentials are stored by WiFiManager, we just check our custom settings
@@ -76,7 +81,23 @@ void setup()
             Serial.println("No configuration found - entering config mode");
         }
         
-        if (network.startConfigPortal(nodeName.c_str(), 300)) {
+        // Generate a random password for the AP
+        String apPassword = "";
+        const char charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+        randomSeed(esp_random());
+        for (int i = 0; i < 8; i++) {
+            apPassword += charset[random(0, sizeof(charset) - 1)];
+        }
+        
+        Serial.printf("AP SSID: %s\r\n", nodeName.c_str());
+        Serial.printf("AP Password: %s\r\n", apPassword.c_str());
+        
+        // Initialize and show configuration screen on e-paper display
+        monitor.init();
+        monitor.showConfigScreen(nodeName.c_str(), apPassword.c_str());
+        
+        // Start config portal with generated password
+        if (network.startConfigPortal(nodeName.c_str(), apPassword.c_str(), 300)) {
             Serial.println("Configuration saved! Restarting...");
             delay(1000);
             ESP.restart();
@@ -231,7 +252,7 @@ void setup()
     
     Serial.println("\n=== Operation Complete ===\n");
     Serial.printf("Entering deep sleep for %d hour(s)...\r\n", sleepHours);
-    Serial.println("To enter config mode, connect GPIO0 to GND before reset");
+    Serial.println("To enter config mode, connect GPIO15 to GND before reset");
     Serial.flush();
     
     // Enter deep sleep

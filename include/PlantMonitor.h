@@ -57,6 +57,13 @@ public:
      */
     void showUpgradeScreen();
 
+    /**
+     * Show WiFi configuration screen with AP credentials and QR code
+     * @param ssid WiFi AP SSID
+     * @param password WiFi AP password
+     */
+    void showConfigScreen(const char* ssid, const char* password);
+
 private:
     // Plant data structure
     struct PlantData {

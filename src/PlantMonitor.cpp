@@ -2,6 +2,7 @@
 #include "DisplayUtils.h"
 #include "fonts.h"
 #include <SPI.h>
+#include <qrcode.h>
 
 /**
  * Constructor
@@ -319,4 +320,118 @@ void PlantMonitor::drawGauge(int x, int y, int w, int h, const char* name, int m
     int nameY = y + h - 5;  // 5px from bottom
     display.setCursor(centerX - tbw / 2, nameY);
     display.print(displayName);
+}
+
+/**
+ * Show WiFi configuration screen with AP credentials and QR code
+ */
+void PlantMonitor::showConfigScreen(const char* ssid, const char* password)
+{
+    Serial.println("Displaying WiFi configuration screen...");
+    
+    display.setFullWindow();
+    display.firstPage();
+    
+    do {
+        display.fillScreen(GxEPD_WHITE);
+        display.setTextColor(GxEPD_BLACK);
+        
+        int16_t tbx, tby;
+        uint16_t tbw, tbh;
+        int currentY = 20;
+        
+        // Title - "Configuration Required"
+        display.setFont(&DejaVu_Sans_Bold_11);
+        display.setTextSize(2);
+        const char* title = "Configuration Required";
+        display.getTextBounds(title, 0, 0, &tbx, &tby, &tbw, &tbh);
+        currentY += tbh;
+        display.setCursor((SCREEN_W - tbw) / 2, currentY);
+        display.print(title);
+        
+        currentY += 10;
+        
+        // Instructions
+        display.setTextSize(1);
+        const char* instruction = "Connect to WiFi network:";
+        display.getTextBounds(instruction, 0, 0, &tbx, &tby, &tbw, &tbh);
+        currentY += tbh + 10;
+        display.setCursor((SCREEN_W - tbw) / 2, currentY);
+        display.print(instruction);
+        
+        // SSID
+        display.setTextSize(1);
+        currentY += tbh + 15;
+        display.getTextBounds("SSID:", 0, 0, &tbx, &tby, &tbw, &tbh);
+        display.setCursor(40, currentY);
+        display.print("SSID:");
+        
+        display.setFont(&DejaVu_Sans_Bold_11);
+        display.setCursor(100, currentY);
+        display.print(ssid);
+        
+        // Password
+        display.setFont(&DejaVu_Sans_Bold_11);
+        currentY += tbh + 10;
+        display.setCursor(40, currentY);
+        display.print("Pass:");
+        
+        display.setFont(&DejaVu_Sans_Bold_11);
+        display.setCursor(100, currentY);
+        display.print(password);
+        
+        // Generate QR code for WiFi connection
+        // WiFi QR code format: WIFI:T:WPA;S:<SSID>;P:<PASSWORD>;;
+        String qrData = "WIFI:T:WPA;S:";
+        qrData += ssid;
+        qrData += ";P:";
+        qrData += password;
+        qrData += ";;";
+        
+        // Create QR code - use version 5 for better compatibility
+        QRCode qrcode;
+        uint8_t qrcodeData[qrcode_getBufferSize(5)];
+        qrcode_initText(&qrcode, qrcodeData, 5, ECC_MEDIUM, qrData.c_str());
+        
+        // Draw QR code centered below the text
+        int qrSize = qrcode.size;
+        int scale = 4;  // Increase scale factor for better scanning
+        int qrPixelSize = qrSize * scale;
+        int qrX = (SCREEN_W - qrPixelSize) / 2;
+        int qrY = currentY + 20;
+        
+        // Draw white background first
+        int border = scale * 4;  // Larger white border for better scanning
+        display.fillRect(qrX - border, qrY - border, qrPixelSize + border * 2, qrPixelSize + border * 2, GxEPD_WHITE);
+        
+        for (uint8_t y = 0; y < qrSize; y++) {
+            for (uint8_t x = 0; x < qrSize; x++) {
+                if (qrcode_getModule(&qrcode, x, y)) {
+                    display.fillRect(qrX + x * scale, qrY + y * scale, scale, scale, GxEPD_BLACK);
+                } else {
+                    display.fillRect(qrX + x * scale, qrY + y * scale, scale, scale, GxEPD_WHITE);
+                }
+            }
+        }
+        
+        // Instructions at bottom
+        display.setFont(&DejaVu_Sans_Bold_11);
+        display.setTextSize(1);
+        currentY = qrY + qrPixelSize + 20;
+        const char* scanMsg = "Scan QR code to connect";
+        display.getTextBounds(scanMsg, 0, 0, &tbx, &tby, &tbw, &tbh);
+        currentY += tbh;
+        display.setCursor((SCREEN_W - tbw) / 2, currentY);
+        display.print(scanMsg);
+        
+        currentY += tbh + 5;
+        const char* urlMsg = "Then open: 192.168.4.1";
+        display.getTextBounds(urlMsg, 0, 0, &tbx, &tby, &tbw, &tbh);
+        currentY += tbh;
+        display.setCursor((SCREEN_W - tbw) / 2, currentY);
+        display.print(urlMsg);
+        
+    } while (display.nextPage());
+    
+    Serial.println("Configuration screen displayed");
 }
