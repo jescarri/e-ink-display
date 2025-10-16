@@ -18,7 +18,7 @@
  *  - CS:   GPIO12, DC:   GPIO17
  *  - RST:  GPIO16, BUSY: GPIO13
  *  - DIN:  GPIO23 (MOSI), CLK:  GPIO18 (SCK)
- *  - Config Mode: GPIO15 (LOW = enable config mode)
+ *  - Config Mode: GPIO4 (LOW = enable config mode)
  */
 
 #include <Arduino.h>
@@ -51,10 +51,10 @@ void setup()
     // Initialize settings system
     settings_init();
     
-    // Check if deep sleep is disabled (GPIO15 LOW) - check EARLY before I2C init
+    // Check if deep sleep is disabled (GPIO4 LOW) - check EARLY before I2C init
     bool deepSleepDisabled = power.isDeepSleepDisabled();
-    Serial.printf("\nGPIO15 state: %s\r\n", deepSleepDisabled ? "LOW (config mode)" : "HIGH (normal mode)");
-    Serial.printf("Config needed: %s\r\n\n", deepSleepDisabled ? "YES (GPIO15 forced)" : "checking settings...");
+    Serial.printf("\nGPIO4 state: %s\r\n", deepSleepDisabled ? "LOW (config mode)" : "HIGH (normal mode)");
+    Serial.printf("Config needed: %s\r\n\n", deepSleepDisabled ? "YES (GPIO4 forced)" : "checking settings...");
     
     // Initialize battery sensor after Serial is ready
     power.initBatterySensor();
@@ -252,7 +252,7 @@ void setup()
     
     Serial.println("\n=== Operation Complete ===\n");
     Serial.printf("Entering deep sleep for %d hour(s)...\r\n", sleepHours);
-    Serial.println("To enter config mode, connect GPIO15 to GND before reset");
+    Serial.println("To enter config mode, connect GPIO4 to GND before reset");
     Serial.flush();
     
     // Enter deep sleep
