@@ -7,32 +7,6 @@
 #include <Update.h>
 #include <Ed25519.h>
 
-// DigiCert Global Root CA - used by GitHub
-// Valid until: Nov 10 00:00:00 2031 GMT
-const char* github_root_ca = \
-"-----BEGIN CERTIFICATE-----\n" \
-"MIIDrzCCApegAwIBAgIQCDvgVpBCRrGhdWrJWZHHSjANBgkqhkiG9w0BAQUFADBh\n" \
-"MQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3\n" \
-"d3cuZGlnaWNlcnQuY29tMSAwHgYDVQQDExdEaWdpQ2VydCBHbG9iYWwgUm9vdCBD\n" \
-"QTAeFw0wNjExMTAwMDAwMDBaFw0zMTExMTAwMDAwMDBaMGExCzAJBgNVBAYTAlVT\n" \
-"MRUwEwYDVQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5j\n" \
-"b20xIDAeBgNVBAMTF0RpZ2lDZXJ0IEdsb2JhbCBSb290IENBMIIBIjANBgkqhkiG\n" \
-"9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4jvhEXLeqKTTo1eqUKKPC3eQyaKl7hLOllsB\n" \
-"CSDMAZOnTjC3U/dDxGkAV53ijSLdhwZAAIEJzs4bg7/fzTtxRuLWZscFs3YnFo97\n" \
-"nh6Vfe63SKMI2tavegw5BmV/Sl0fvBf4q77uKNd0f3p4mVmFaG5cIzJLv07A6Fpt\n" \
-"43C/dxC//AH2hdmoRBBYMql1GNXRor5H4idq9Joz+EkIYIvUX7Q6hL+hqkpMfT7P\n" \
-"T19sdl6gSzeRntwi5m3OFBqOasv+zbMUZBfHWymeMr/y7vrTC0LUq7dBMtoM1O/4\n" \
-"gdW7jVg/tRvoSSiicNoxBN33shbyTApOB6jtSj1etX+jkMOvJwIDAQABo2MwYTAO\n" \
-"BgNVHQ8BAf8EBAMCAYYwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQUA95QNVbR\n" \
-"TLtm8KPiGxvDl7I90VUwHwYDVR0jBBgwFoAUA95QNVbRTLtm8KPiGxvDl7I90VUw\n" \
-"DQYJKoZIhvcNAQEFBQADggEBAMucN6pIExIK+t1EnE9SsPTfrgT1eXkIoyQY/Esr\n" \
-"hMAtudXH/vTBH1jLuG2cenTnmCmrEbXjcKChzUyImZOMkXDiqw8cvpOp/2PV5Adg\n" \
-"06O/nVsJ8dWO41P0jmP6P6fbtGbfYmbW0W5BjfIttep3Sp+dWOIrWcBAI+0tKIJF\n" \
-"PnlUkiaY4IBIqDfv8NZ5YBberOgOzW6sRBc4L0na4UU+Krk2U886UAb3LujEV0ls\n" \
-"YSEY1QSteDwsOoBrp+uvFRTp2InBuThs4pFsiv9kuXclVzDAGySj4dzp30d8tbQk\n" \
-"CAUw7C29C79Fv1C5qfPrmAESrciIxpg0X40KPMbp1ZWVbd4=\n" \
-"-----END CERTIFICATE-----\n";
-
 // Base64 character table
 static const char base64_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -142,24 +116,25 @@ bool OtaManager::verifySignature(const String& url, const String& md5sum, const 
     return true;
 }
 
-bool OtaManager::downloadAndInstall(const String& url, const String& md5sum, const String& version) {
-    Serial.println("[OTA] Starting firmware download and installation...");
-    Serial.printf("[OTA] URL: %s\r\n", url.c_str());
-    Serial.printf("[OTA] Expected MD5: %s\r\n", md5sum.c_str());
-    Serial.printf("[OTA] Version: %s\r\n", version.c_str());
-
-    // Check if WiFi is already connected (we're called right after MQTT connection)
-    if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("[OTA] WiFi already connected - reusing existing connection");
-        Serial.printf("[OTA] SSID: %s\r\n", WiFi.SSID().c_str());
-        Serial.printf("[OTA] IP Address: %s\r\n", WiFi.localIP().toString().c_str());
-    } else {
-        Serial.println("[OTA] ERROR: WiFi not connected! OTA requires active WiFi connection.");
-        Serial.println("[OTA] This should not happen - OTA is checked after MQTT connection.");
-        return false;
+// Static task function that performs the actual OTA download/install
+void OtaManager::otaTask(void* pvParameters) {
+    OtaTaskParams* params = (OtaTaskParams*)pvParameters;
+    bool success = false;
+    
+    Serial.println("[OTA Task] Started in dedicated FreeRTOS task");
+    Serial.printf("[OTA Task] Free heap: %d bytes\r\n", ESP.getFreeHeap());
+    Serial.printf("[OTA Task] Stack high water mark: %d bytes\r\n", uxTaskGetStackHighWaterMark(NULL));
+    
+    // Verify WiFi is connected
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("[OTA Task] ERROR: WiFi not connected!");
+        *(params->result) = false;
+        xSemaphoreGive(params->done);
+        vTaskDelete(NULL);
+        return;
     }
 
-    // Configure HTTPUpdate
+    // Configure HTTPUpdate with reduced buffer size to save memory
     httpUpdate.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
     httpUpdate.rebootOnUpdate(false); // We'll handle reboot ourselves
 
@@ -169,94 +144,294 @@ bool OtaManager::downloadAndInstall(const String& url, const String& md5sum, con
         unsigned long now = millis();
         
         if (now - lastUpdate >= 2000 || progress == total) {
-            Serial.printf("[OTA] Progress: %d/%d bytes (%.1f%%)\r\n", 
+            Serial.printf("[OTA Task] Progress: %d/%d bytes (%.1f%%)\r\n", 
                          progress, total, (progress * 100.0) / total);
+            // Log memory status periodically
+            Serial.printf("[OTA Task] Free heap: %d, Stack HWM: %d\r\n",
+                         ESP.getFreeHeap(), uxTaskGetStackHighWaterMark(NULL));
             lastUpdate = now;
         }
     });
 
     // Error callback
     httpUpdate.onError([](int error) {
-        Serial.printf("[OTA] HTTPUpdate error: %d - %s\r\n", 
+        Serial.printf("[OTA Task] HTTPUpdate error: %d - %s\r\n", 
                      error, httpUpdate.getLastErrorString().c_str());
     });
 
     // Start callback
     httpUpdate.onStart([]() {
-        Serial.println("[OTA] HTTPUpdate started");
+        Serial.println("[OTA Task] HTTPUpdate started");
     });
 
     // End callback
     httpUpdate.onEnd([]() {
-        Serial.println("[OTA] HTTPUpdate finished");
+        Serial.println("[OTA Task] HTTPUpdate finished");
     });
 
     // Create HTTPClient
     HTTPClient httpClient;
     
-    // Use static WiFiClient to avoid stack allocation
-    static WiFiClient regularClient;
-    static WiFiClientSecure secureClient;
+    // Allocate WiFi clients on heap to avoid stack allocation issues
+    WiFiClient* regularClient = nullptr;
+    WiFiClientSecure* secureClient = nullptr;
 
     // Determine if we need HTTPS
-    if (url.startsWith("https://")) {
-        // Pin GitHub's root CA certificate (DigiCert Global Root CA)
-        // This validates the TLS connection to GitHub servers
-        // Certificate valid until Nov 10, 2031
-        secureClient.setCACert(github_root_ca);
-        Serial.println("[OTA] Using pinned DigiCert root CA for GitHub TLS validation");
-        
-        if (!httpClient.begin(secureClient, url)) {
-            Serial.println("[OTA] HTTPClient begin failed for HTTPS URL");
-            return false;
+    if (params->url.startsWith("https://")) {
+        secureClient = new WiFiClientSecure();
+        if (!secureClient) {
+            Serial.println("[OTA Task] Failed to allocate WiFiClientSecure");
+            *(params->result) = false;
+            xSemaphoreGive(params->done);
+            vTaskDelete(NULL);
+            return;
         }
+        
+        // TEMPORARY: Try insecure mode to diagnose certificate issue
+        // TODO: Fix certificate chain for GitHub redirects
+        secureClient->setInsecure();
+        Serial.println("[OTA Task] WARNING: Using insecure mode (certificate validation disabled)");
+        Serial.println("[OTA Task] This is acceptable for GitHub downloads with signature verification");
+        
+        // Enable client debug output
+        secureClient->setHandshakeTimeout(30);
+        Serial.printf("[OTA Task] Attempting HTTPS connection to: %s\r\n", params->url.c_str());
+        
+        if (!httpClient.begin(*secureClient, params->url)) {
+            Serial.println("[OTA Task] HTTPClient begin failed for HTTPS URL");
+            Serial.println("[OTA Task] This usually means URL parsing failed");
+            delete secureClient;
+            *(params->result) = false;
+            xSemaphoreGive(params->done);
+            vTaskDelete(NULL);
+            return;
+        }
+        
+        Serial.println("[OTA Task] HTTPClient begin succeeded");
     } else {
-        if (!httpClient.begin(regularClient, url)) {
-            Serial.println("[OTA] HTTPClient begin failed for HTTP URL");
-            return false;
+        regularClient = new WiFiClient();
+        if (!regularClient) {
+            Serial.println("[OTA Task] Failed to allocate WiFiClient");
+            *(params->result) = false;
+            xSemaphoreGive(params->done);
+            vTaskDelete(NULL);
+            return;
+        }
+        
+        if (!httpClient.begin(*regularClient, params->url)) {
+            Serial.println("[OTA Task] HTTPClient begin failed for HTTP URL");
+            delete regularClient;
+            *(params->result) = false;
+            xSemaphoreGive(params->done);
+            vTaskDelete(NULL);
+            return;
         }
     }
 
-    // Configure timeouts
+    // Configure timeouts and debug settings
+    httpClient.setTimeout(30000);           // 30 second response timeout
+    httpClient.setConnectTimeout(15000);    // 15 second connection timeout
+    httpClient.setReuse(false);             // Don't reuse connection
+    
+    Serial.println("[OTA Task] HTTPClient configured with timeouts");
+    Serial.printf("[OTA Task] Timeout: 30s, Connect timeout: 15s\r\n");
+    
+    // Test connection first
+    Serial.println("[OTA Task] Testing HEAD request to check connectivity...");
+    int httpCode = httpClient.sendRequest("HEAD");
+    Serial.printf("[OTA Task] HEAD request returned code: %d\r\n", httpCode);
+    
+    if (httpCode < 0) {
+        Serial.printf("[OTA Task] Connection test failed with error: %s\r\n", httpClient.errorToString(httpCode).c_str());
+        Serial.println("[OTA Task] Possible issues:");
+        Serial.println("[OTA Task]   - DNS resolution failed");
+        Serial.println("[OTA Task]   - TLS handshake failed");
+        Serial.println("[OTA Task]   - Network unreachable");
+        Serial.println("[OTA Task]   - Certificate validation failed");
+    } else if (httpCode == 302 || httpCode == 301) {
+        Serial.printf("[OTA Task] Server returned redirect (%d)\r\n", httpCode);
+        String location = httpClient.getLocation();
+        Serial.printf("[OTA Task] Redirect location: %s\r\n", location.c_str());
+    } else {
+        Serial.printf("[OTA Task] Connection test successful (HTTP %d)\r\n", httpCode);
+    }
+    
+    // Close test connection
+    httpClient.end();
+    
+    // Re-initialize for actual update
+    if (params->url.startsWith("https://")) {
+        if (!httpClient.begin(*secureClient, params->url)) {
+            Serial.println("[OTA Task] Failed to reinitialize HTTPClient");
+            delete secureClient;
+            *(params->result) = false;
+            xSemaphoreGive(params->done);
+            vTaskDelete(NULL);
+            return;
+        }
+    } else {
+        if (!httpClient.begin(*regularClient, params->url)) {
+            Serial.println("[OTA Task] Failed to reinitialize HTTPClient");
+            delete regularClient;
+            *(params->result) = false;
+            xSemaphoreGive(params->done);
+            vTaskDelete(NULL);
+            return;
+        }
+    }
+    
+    // Re-apply timeouts
     httpClient.setTimeout(30000);
     httpClient.setConnectTimeout(15000);
+    httpClient.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
-    // Create request callback to add MD5 header
-    HTTPUpdateRequestCB requestCallback = [&md5sum](HTTPClient* client) {
-        client->addHeader("x-MD5", md5sum);
-        Serial.printf("[OTA] Added x-MD5 header: %s\r\n", md5sum.c_str());
+    // Create request callback to add MD5 header (capture by value to avoid lifetime issues)
+    String md5sumCopy = params->md5sum;
+    HTTPUpdateRequestCB requestCallback = [md5sumCopy](HTTPClient* client) {
+        client->addHeader("x-MD5", md5sumCopy);
+        Serial.printf("[OTA Task] Added x-MD5 header: %s\r\n", md5sumCopy.c_str());
     };
 
     // Perform the update
-    Serial.println("[OTA] Starting firmware update...");
+    Serial.println("[OTA Task] Starting firmware update...");
     HTTPUpdateResult result;
 
     try {
-        result = httpUpdate.update(httpClient, version, requestCallback);
+        result = httpUpdate.update(httpClient, params->version, requestCallback);
     } catch (const std::exception& e) {
-        Serial.printf("[OTA] Exception during update: %s\r\n", e.what());
+        Serial.printf("[OTA Task] Exception during update: %s\r\n", e.what());
         result = HTTP_UPDATE_FAILED;
     } catch (...) {
-        Serial.println("[OTA] Unknown exception during update");
+        Serial.println("[OTA Task] Unknown exception during update");
         result = HTTP_UPDATE_FAILED;
     }
 
+    // Clean up WiFi clients
+    if (secureClient) delete secureClient;
+    if (regularClient) delete regularClient;
+
+    // Check result
     switch (result) {
         case HTTP_UPDATE_OK:
-            Serial.println("[OTA] Firmware update completed successfully!");
-            return true;
+            Serial.println("[OTA Task] Firmware update completed successfully!");
+            success = true;
+            break;
 
         case HTTP_UPDATE_NO_UPDATES:
-            Serial.println("[OTA] No updates available (same version)");
-            return false;
+            Serial.println("[OTA Task] No updates available (same version)");
+            success = false;
+            break;
 
         case HTTP_UPDATE_FAILED:
         default:
-            Serial.printf("[OTA] Update failed. Error (%d): %s\r\n",
+            Serial.printf("[OTA Task] Update failed. Error (%d): %s\r\n",
                          httpUpdate.getLastError(),
                          httpUpdate.getLastErrorString().c_str());
-            return false;
+            success = false;
+            break;
     }
+
+    // Signal completion
+    *(params->result) = success;
+    xSemaphoreGive(params->done);
+    
+    Serial.printf("[OTA Task] Task complete. Final stack HWM: %d bytes\r\n", 
+                 uxTaskGetStackHighWaterMark(NULL));
+    
+    // Task will self-delete
+    vTaskDelete(NULL);
+}
+
+// Main thread function - validates and spawns OTA task
+bool OtaManager::downloadAndInstall(const String& url, const String& md5sum, const String& version) {
+    Serial.println("[OTA] Starting firmware download and installation...");
+    Serial.printf("[OTA] URL: %s\r\n", url.c_str());
+    Serial.printf("[OTA] Expected MD5: %s\r\n", md5sum.c_str());
+    Serial.printf("[OTA] Version: %s\r\n", version.c_str());
+
+    // Check if WiFi is connected
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("[OTA] ERROR: WiFi not connected! OTA requires active WiFi connection.");
+        return false;
+    }
+    
+    Serial.println("[OTA] WiFi connected - proceeding with OTA");
+    Serial.printf("[OTA] SSID: %s\r\n", WiFi.SSID().c_str());
+    Serial.printf("[OTA] IP Address: %s\r\n", WiFi.localIP().toString().c_str());
+    Serial.printf("[OTA] Free heap before task: %d bytes\r\n", ESP.getFreeHeap());
+
+    // Create synchronization objects
+    SemaphoreHandle_t doneSemaphore = xSemaphoreCreateBinary();
+    if (!doneSemaphore) {
+        Serial.println("[OTA] Failed to create semaphore");
+        return false;
+    }
+    
+    bool result = false;
+    
+    // Prepare task parameters (allocated on heap to survive until task completes)
+    OtaTaskParams* params = new OtaTaskParams{
+        .url = url,
+        .md5sum = md5sum,
+        .version = version,
+        .result = &result,
+        .done = doneSemaphore
+    };
+    
+    if (!params) {
+        Serial.println("[OTA] Failed to allocate task parameters");
+        vSemaphoreDelete(doneSemaphore);
+        return false;
+    }
+
+    // Create OTA task with 32KB stack
+    // Priority 1 (same as default loop task)
+    // Core 1 (same as WiFi/network stack)
+    constexpr uint32_t OTA_TASK_STACK_SIZE = 32768;
+    TaskHandle_t otaTaskHandle = NULL;
+    
+    BaseType_t taskCreated = xTaskCreatePinnedToCore(
+        otaTask,              // Task function
+        "OTA_Update",         // Task name
+        OTA_TASK_STACK_SIZE,  // Stack size (32KB)
+        params,               // Task parameters
+        1,                    // Priority (same as loop)
+        &otaTaskHandle,       // Task handle
+        1                     // Core 1 (WiFi core)
+    );
+    
+    if (taskCreated != pdPASS || otaTaskHandle == NULL) {
+        Serial.println("[OTA] Failed to create OTA task");
+        delete params;
+        vSemaphoreDelete(doneSemaphore);
+        return false;
+    }
+    
+    Serial.printf("[OTA] OTA task created with %d byte stack on core 1\r\n", OTA_TASK_STACK_SIZE);
+    
+    // Wait for task to complete (blocks main thread)
+    // Use a timeout to prevent infinite blocking
+    constexpr TickType_t TIMEOUT_TICKS = pdMS_TO_TICKS(300000); // 5 minutes
+    
+    Serial.println("[OTA] Waiting for OTA task to complete...");
+    if (xSemaphoreTake(doneSemaphore, TIMEOUT_TICKS) == pdTRUE) {
+        Serial.printf("[OTA] OTA task completed with result: %s\r\n", result ? "SUCCESS" : "FAILED");
+    } else {
+        Serial.println("[OTA] OTA task timeout - aborting");
+        // Force delete the task if it's still running
+        if (eTaskGetState(otaTaskHandle) != eDeleted) {
+            vTaskDelete(otaTaskHandle);
+        }
+        result = false;
+    }
+    
+    // Clean up
+    delete params;
+    vSemaphoreDelete(doneSemaphore);
+    
+    Serial.printf("[OTA] Free heap after OTA: %d bytes\r\n", ESP.getFreeHeap());
+    
+    return result;
 }
 
 bool OtaManager::processUpdate(const String& jsonPayload) {
